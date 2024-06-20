@@ -1,37 +1,43 @@
-# Infrastructure for Yandex Cloud Managed Service for Apache Kafka® cluster and Virtual Machine
+# Infrastructure for the Yandex Cloud Managed Service for Apache Kafka® cluster and Virtual Machine
 #
-# RU: https://cloud.yandex.ru/docs/managed-kafka/tutorials/mirrormaker-unmanaged-topics
-# EN: https://cloud.yandex.com/en/docs/managed-kafka/tutorials/mirrormaker-unmanaged-topics
+# RU: https://yandex.cloud/ru/docs/managed-kafka/tutorials/kafka-connectors
+# EN: https://yandex.cloud/en/docs/managed-kafka/tutorials/kafka-connectors
 #
-# Set the following settings:
+# Configure the parameters of the Managed Service for Apache Kafka® cluster and Virtual Machine:
 
 locals {
-  zone_a_v4_cidr_blocks = "10.1.0.0/16" # Set the CIDR block for subnet in the ru-central1-a availability zone.
-  username              = ""            # Set the admin username in Managed Service for Apache Kafka® cluster.
-  password              = ""            # Set the admin password Managed Service for Apache Kafka® cluster.
-  image_id              = ""            # Set a public image ID from https://cloud.yandex.com/en/docs/compute/operations/images-with-pre-installed-software/get-list.
-  vm_username           = ""            # Set the username to connect to the routing VM via SSH. For Ubuntu images `ubuntu` username is used by default.
-  vm_ssh_key_path       = ""            # Set the path to the public SSH public key for the routing VM. Example: "~/.ssh/key.pub".
+  kf_password     = "" # Apache Kafka® admin's password
+  kf_version      = "" # Desired version of Apache Kafka®. For available versions, see the documentation main page: https://yandex.cloud/en/docs/managed-kafka/.
+  image_id        = "" # Public image ID from https://yandex.cloud/en/docs/compute/operations/images-with-pre-installed-software/get-list
+  vm_username     = "" # Username to connect to the routing VM via SSH. Images with Ubuntu Linux use the `ubuntu` username by default.
+  vm_ssh_key_path = "" # Path to the SSH public key for the routing VM. Example: "~/.ssh/key.pub".
+
+  # The following settings are predefined. Change them only if necessary.
+  network_name          = "network"       # Name of the network
+  subnet_name           = "subnet-a"      # Name of the subnet
+  zone_a_v4_cidr_blocks = "10.1.0.0/16"   # CIDR block for subnet in the ru-central1-a availability zone
+  kf_cluster_name       = "kafka-cluster" # Name of the Apache Kafka® cluster
+  kf_username           = "admin-cloud"   # Username of the Apache Kafka® cluster
 }
 
+# Network infrastructure
 
 resource "yandex_vpc_network" "network" {
   description = "Network for the Managed Service for Apache Kafka® cluster and VM"
-  name        = "network"
+  name        = local.network_name
 }
 
-# Subnet in ru-central1-a availability zone
 resource "yandex_vpc_subnet" "subnet-a" {
   description    = "Subnet in the ru-central1-a availability zone"
-  name           = "subnet-a"
+  name           = local.subnet_name
   zone           = "ru-central1-a"
   network_id     = yandex_vpc_network.network.id
   v4_cidr_blocks = [local.zone_a_v4_cidr_blocks]
 }
 
-# Security group for the Managed Service for Apache Kafka® cluster and VM
 resource "yandex_vpc_default_security_group" "security-group" {
-  network_id = yandex_vpc_network.network.id
+  description = "Security group for the Managed Service for Apache Kafka® cluster and VM"
+  network_id  = yandex_vpc_network.network.id
 
   ingress {
     description    = "Allow connections to the Managed Service for Apache Kafka® cluster from the Internet"
@@ -41,7 +47,6 @@ resource "yandex_vpc_default_security_group" "security-group" {
     v4_cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Allow SSH connections for VM
   ingress {
     description    = "Allow SSH connections for VM from the Internet"
     protocol       = "TCP"
@@ -58,18 +63,19 @@ resource "yandex_vpc_default_security_group" "security-group" {
   }
 }
 
+# Infrastructure for the Managed Service for Apache Kafka® cluster
+
 resource "yandex_mdb_kafka_cluster" "kafka-cluster" {
   description        = "Yandex Managed Service for Apache Kafka® cluster"
-  name               = "kafka-cluster"
+  name               = local.kf_cluster_name
   environment        = "PRODUCTION"
   network_id         = yandex_vpc_network.network.id
   security_group_ids = [yandex_vpc_default_security_group.security-group.id]
 
   config {
-    brokers_count    = 1
-    version          = "2.8"
-    zones            = ["ru-central1-a"]
-    unmanaged_topics = true # Topic management via the Admin API
+    brokers_count = 1
+    version       = local.kf_version
+    zones         = ["ru-central1-a"]
     kafka {
       resources {
         disk_size          = 10 # GB
@@ -82,15 +88,23 @@ resource "yandex_mdb_kafka_cluster" "kafka-cluster" {
     }
   }
 
-  user {
-    name     = local.username
-    password = local.password
-    permission {
-      topic_name = "*"
-      role       = "ACCESS_ROLE_ADMIN"
-    }
+  depends_on = [
+    yandex_vpc_subnet.subnet-a
+  ]
+}
+
+# User of the Managed service for the Apache Kafka® cluster
+resource "yandex_mdb_kafka_user" "mkf-user" {
+  cluster_id = yandex_mdb_kafka_cluster.kafka-cluster.id
+  name       = local.kf_username
+  password   = local.kf_password
+  permission {
+    topic_name = "*"
+    role       = "ACCESS_ROLE_ADMIN"
   }
 }
+
+# VM infrastructure
 
 resource "yandex_compute_instance" "vm-mirror-maker" {
   description = "VM in Yandex Compute Cloud"
