@@ -101,7 +101,7 @@ resource "yandex_mdb_kafka_cluster" "kafka-cluster" {
   ]
 }
 
-# User of the Managed service for Apache Kafka® cluster
+# User of the Managed Service for Apache Kafka® cluster
 resource "yandex_mdb_kafka_user" "mkf-user" {
   cluster_id = yandex_mdb_kafka_cluster.kafka-cluster.id
   name       = local.kf_username
